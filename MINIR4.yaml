@@ -22,6 +22,7 @@ esp32:
     type: esp-idf
 
 logger:
+  level: DEBUG   # Options: NONE, ERROR, WARN, INFO, DEBUG, VERBOSE, VERY_VERBOSE
 
 globals:
   - id: switch_mode
