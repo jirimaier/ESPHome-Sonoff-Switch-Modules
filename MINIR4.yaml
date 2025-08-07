@@ -1,0 +1,145 @@
+substitutions:
+  devicename: sonoff-minir4
+  friendly_name: SONOFF MINIR4
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+
+  on_boot:
+    priority: -100
+    then:
+      - select.set:
+          id: switch_mode_select
+          option: !lambda |-
+            if (id(switch_mode) == 0) return "Detached";
+            else if (id(switch_mode) == 1) return "Direct Toggle";
+            else return "Direct Follow";
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+globals:
+  - id: switch_mode
+    type: int
+    restore_value: yes
+    initial_value: '0'  # 0=Detached, 1=Toggle, 2=Follow
+
+select:
+  - platform: template
+    name: "Switch Mode"
+    id: switch_mode_select
+    optimistic: true
+    options:
+      - "Detached"
+      - "Direct Toggle"
+      - "Direct Follow"
+    initial_option: "Detached"
+    restore_value: true
+    entity_category: config
+    set_action:
+      - lambda: |-
+          if (x == "Detached") {
+            id(switch_mode) = 0;
+          } else if (x == "Direct Toggle") {
+            id(switch_mode) = 1;
+          } else {
+            id(switch_mode) = 2;
+          }
+
+number:
+  - platform: template
+    name: "Long Press Duration"
+    id: long_press_duration
+    entity_category: config
+    unit_of_measurement: "s"
+    min_value: 0.5
+    max_value: 10
+    step: 0.1
+    initial_value: 1.0
+    restore_value: true
+    optimistic: True
+
+switch:
+  - platform: gpio
+    name: "Relay"
+    pin:
+      number: GPIO26
+      inverted: false
+    id: relay
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - output.turn_on: relay1_led_gpio
+    on_turn_off:
+      - output.turn_off: relay1_led_gpio
+
+button:
+  - platform: restart
+    name: "Restart"
+
+output:
+  - platform: gpio
+    pin: GPIO19
+    inverted: true
+    id: relay1_led_gpio
+
+script:
+  - id: long_press_trigger
+    mode: restart
+    then:
+      - delay: !lambda 'return (uint32_t)(id(long_press_duration).state * 1000);'
+      - binary_sensor.template.publish:
+          id: long_press
+          state: true
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO27
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Switch"
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms
+
+    on_press:
+      then:
+        - script.execute: long_press_trigger
+        - lambda: |-
+            if (id(switch_mode) == 1) {
+              id(relay).toggle();
+            } else if (id(switch_mode) == 2) {
+              id(relay).turn_on();
+            }
+
+    on_release:
+      then:
+        - script.stop: long_press_trigger
+        - binary_sensor.template.publish:
+            id: long_press
+            state: false
+        - lambda: |-
+            if (id(switch_mode) == 2) {
+              id(relay).turn_off();
+            }
+
+  - platform: template
+    name: "Switch Long Press"
+    id: long_press
+
+  - platform: gpio
+    internal: true
+    pin:
+      number: GPIO0
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Button"
+    filters:
+      - delayed_on: 50ms
+    on_press:
+      - switch.toggle: relay
