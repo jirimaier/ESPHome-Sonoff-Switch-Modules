@@ -131,6 +131,7 @@ binary_sensor:
   - platform: template
     name: "Switch Long Press"
     id: long_press
+    initial_state: false
 
   - platform: gpio
     internal: true
