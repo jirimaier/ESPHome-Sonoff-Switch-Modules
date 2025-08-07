@@ -15,6 +15,9 @@ esphome:
             if (id(switch_mode) == 0) return "Detached";
             else if (id(switch_mode) == 1) return "Direct Toggle";
             else return "Direct Follow";
+      - binary_sensor.template.publish:
+          id: long_press
+          state: false
 
 esp32:
   board: esp32dev
@@ -132,7 +135,6 @@ binary_sensor:
   - platform: template
     name: "Switch Long Press"
     id: long_press
-    initial_state: false
 
   - platform: gpio
     internal: true
