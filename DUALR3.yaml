@@ -1,0 +1,187 @@
+substitutions:
+  devicename: sonoff-dualr3
+  friendly_name: SONOFF DUALR3
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+
+  on_boot:
+    priority: -100
+    then:
+      - select.set:
+          id: switch1_mode_select
+          option: !lambda |-
+            if (id(switch_mode1) == 0) return "Detached";
+            else if (id(switch_mode1) == 1) return "Direct Toggle";
+            else return "Direct Follow";
+      - select.set:
+          id: switch2_mode_select
+          option: !lambda |-
+            if (id(switch_mode2) == 0) return "Detached";
+            else if (id(switch_mode2) == 1) return "Direct Toggle";
+            else return "Direct Follow";
+      - binary_sensor.template.publish: { id: long_press_1, state: false }
+      - binary_sensor.template.publish: { id: long_press_2, state: false }
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: DEBUG
+
+globals:
+  - id: switch_mode1
+    type: int
+    restore_value: yes
+    initial_value: '0'  # 0=Detached, 1=Toggle, 2=Follow
+  - id: switch_mode2
+    type: int
+    restore_value: yes
+    initial_value: '0'
+
+select:
+  - platform: template
+    name: "Switch 1 Mode"
+    id: switch1_mode_select
+    optimistic: true
+    options: ["Detached","Direct Toggle","Direct Follow"]
+    initial_option: "Detached"
+    restore_value: true
+    entity_category: config
+    set_action:
+      - lambda: |-
+          id(switch_mode1) = (x == "Detached") ? 0 : (x == "Direct Toggle") ? 1 : 2;
+
+  - platform: template
+    name: "Switch 2 Mode"
+    id: switch2_mode_select
+    optimistic: true
+    options: ["Detached","Direct Toggle","Direct Follow"]
+    initial_option: "Detached"
+    restore_value: true
+    entity_category: config
+    set_action:
+      - lambda: |-
+          id(switch_mode2) = (x == "Detached") ? 0 : (x == "Direct Toggle") ? 1 : 2;
+
+number:
+  - platform: template
+    name: "Long Press Duration"
+    id: long_press_duration
+    entity_category: config
+    unit_of_measurement: "s"
+    min_value: 0.5
+    max_value: 10
+    step: 0.1
+    initial_value: 1.0
+    restore_value: true
+    optimistic: true
+
+# ---------- RELAYS ----------
+switch:
+  - platform: gpio
+    name: "Relay 1"
+    id: relay1
+    pin:
+      number: GPIO27          # Relay 1 / LED 1 (red)
+      inverted: false
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  - platform: gpio
+    name: "Relay 2"
+    id: relay2
+    pin:
+      number: GPIO14          # Relay 2 / LED 2 (red)
+      inverted: false
+    restore_mode: RESTORE_DEFAULT_OFF
+
+button:
+  - platform: restart
+    name: "Restart"
+
+# ---------- WIFI / STATUS LED ----------
+status_led:
+  pin:
+    number: GPIO13            # Blue status LED (inverted)
+    inverted: true
+
+# ---------- LONG PRESS SCRIPTS ----------
+script:
+  - id: long_press_trigger_1
+    mode: restart
+    then:
+      - delay: !lambda 'return (uint32_t)(id(long_press_duration).state * 1000);'
+      - binary_sensor.template.publish: { id: long_press_1, state: true }
+
+  - id: long_press_trigger_2
+    mode: restart
+    then:
+      - delay: !lambda 'return (uint32_t)(id(long_press_duration).state * 1000);'
+      - binary_sensor.template.publish: { id: long_press_2, state: true }
+
+# ---------- SWITCH INPUTS & FRONT BUTTON ----------
+binary_sensor:
+  # Wall Switch 1
+  - platform: gpio
+    name: "Switch 1"
+    pin:
+      number: GPIO32          # Switch 1 (inverted)
+      mode: INPUT_PULLUP
+      inverted: true
+    filters: [ delayed_on: 50ms, delayed_off: 50ms ]
+    on_press:
+      then:
+        - script.execute: long_press_trigger_1
+        - lambda: |-
+            if (id(switch_mode1) == 1) { id(relay1).toggle(); }
+            else if (id(switch_mode1) == 2) { id(relay1).turn_on(); }
+    on_release:
+      then:
+        - script.stop: long_press_trigger_1
+        - binary_sensor.template.publish: { id: long_press_1, state: false }
+        - lambda: |-
+            if (id(switch_mode1) == 2) { id(relay1).turn_off(); }
+
+  # Wall Switch 2
+  - platform: gpio
+    name: "Switch 2"
+    pin:
+      number: GPIO33          # Switch 2 (inverted)
+      mode: INPUT_PULLUP
+      inverted: true
+    filters: [ delayed_on: 50ms, delayed_off: 50ms ]
+    on_press:
+      then:
+        - script.execute: long_press_trigger_2
+        - lambda: |-
+            if (id(switch_mode2) == 1) { id(relay2).toggle(); }
+            else if (id(switch_mode2) == 2) { id(relay2).turn_on(); }
+    on_release:
+      then:
+        - script.stop: long_press_trigger_2
+        - binary_sensor.template.publish: { id: long_press_2, state: false }
+        - lambda: |-
+            if (id(switch_mode2) == 2) { id(relay2).turn_off(); }
+
+  # Front push button on the device
+  - platform: gpio
+    name: "Button"
+    pin:
+      number: GPIO0           # Push Button (inverted)
+      mode: INPUT_PULLUP
+      inverted: true
+    filters: [ delayed_on: 50ms ]
+    on_press:
+      - switch.toggle: relay1  # change to toggle both if you like
+
+  # Long-press indicator templates
+  - platform: template
+    name: "Switch 1 Long Press"
+    id: long_press_1
+
+  - platform: template
+    name: "Switch 2 Long Press"
+    id: long_press_2
